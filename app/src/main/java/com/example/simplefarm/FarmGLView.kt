@@ -3,27 +3,21 @@ package com.example.simplefarm
 import android.content.Context
 import android.opengl.GLSurfaceView
 import android.view.MotionEvent
-import android.view.ScaleGestureDetector
 import kotlin.math.hypot
 
-/** View OpenGL: ketuk = tanam/panen, geser = putar kamera, cubit = zoom. */
+/**
+ * View OpenGL layar penuh: geser = melihat sekeliling, ketuk = pakai item
+ * pada petak yang dibidik crosshair. (Analog jalan ada di view terpisah.)
+ */
 class FarmGLView(context: Context, private val renderer: FarmRenderer) : GLSurfaceView(context) {
 
+    private var activeId = -1
     private var downX = 0f
     private var downY = 0f
     private var lastX = 0f
-    private var dragging = false
-
-    private val scaleDetector = ScaleGestureDetector(
-        context,
-        object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
-            override fun onScale(detector: ScaleGestureDetector): Boolean {
-                val f = detector.scaleFactor
-                queueEvent { renderer.zoom(f) }
-                return true
-            }
-        }
-    )
+    private var lastY = 0f
+    private var downTime = 0L
+    private var moved = false
 
     init {
         setEGLContextClientVersion(2)
@@ -34,38 +28,40 @@ class FarmGLView(context: Context, private val renderer: FarmRenderer) : GLSurfa
     }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
-        scaleDetector.onTouchEvent(e)
-
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                activeId = e.getPointerId(0)
                 downX = e.x
                 downY = e.y
                 lastX = e.x
-                dragging = false
-            }
-            MotionEvent.ACTION_POINTER_DOWN -> {
-                // dua jari = cubit, jangan dianggap ketukan
-                dragging = true
+                lastY = e.y
+                downTime = e.eventTime
+                moved = false
             }
             MotionEvent.ACTION_MOVE -> {
-                if (e.pointerCount == 1) {
-                    if (!dragging && hypot(e.x - downX, e.y - downY) > 24f) {
-                        dragging = true
+                val idx = e.findPointerIndex(activeId)
+                if (idx >= 0) {
+                    val x = e.getX(idx)
+                    val y = e.getY(idx)
+                    if (hypot(x - downX, y - downY) > 24f) moved = true
+                    if (moved) {
+                        val dx = x - lastX
+                        val dy = y - lastY
+                        queueEvent { renderer.look(dx, dy) }
                     }
-                    if (dragging) {
-                        val dx = e.x - lastX
-                        queueEvent { renderer.rotate(dx) }
-                    }
+                    lastX = x
+                    lastY = y
                 }
-                lastX = e.x
             }
             MotionEvent.ACTION_UP -> {
-                if (!dragging) {
-                    val x = e.x
-                    val y = e.y
-                    queueEvent { renderer.tap(x, y) }
+                if (!moved && e.eventTime - downTime < 400L) {
+                    queueEvent { renderer.useItem() }
                     performClick()
                 }
+                activeId = -1
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                activeId = -1
             }
         }
         return true
